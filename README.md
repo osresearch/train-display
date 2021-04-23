@@ -23,29 +23,30 @@ and interleaved between rows, so image must be clocked in together.
 | G0       |  5  |  6  | VDD (Mux) |
 | G0       |  7  |  8  | VDD (Mux) |
 | G0       |  9  | 10  | VDD (Mux) |
-| G0       | 11  | 12  | Clk (SR)  |
-| G0       | 13  | 14  | Latch (SR)|
+| G0       | 11  | 12  | Latch (SR)|
+| G0       | 13  | 14  | Clock (SR)|
 | G0       | 15  | 16  | !E (Mux)  |
 | GND      | 17  | 18  | A3 (Mux)  |
 | GND      | 19  | 20  | A2 (Mux)  |
 | GND      | 21  | 22  | A1 (Mux)  |
 | GND      | 23  | 24  | A0 (Mux)  |
-| GND      | 25  | 26  | VDD (LED) |
-| GND      | 27  | 28  | VDD (LED) |
-| GND      | 29  | 30  | VDD (LED) |
+| GND      | 25  | 26  | NC?       |
+| GND      | 27  | 28  | GND       |
+| GND      | 29  | 30  | GND       |
 | GND      | 31  | 32  | VDD (LED) |
 | GND      | 33  | 34  | VDD (LED) |
-
-`G0` doesn't directly connect to `GND`, although it might via a capacitor.
 
 * Mux EL is tied high, so address is immediately used by decoder
 * Mux !E is pulled high via a resistor, so it must be driven low to turn on
 * Shift register !EN is tied low, so always active
 * Shift register Latch and Clock are routed to the quad line driver
 * Line driver output enables are tied low, so always active
-* LED power has five pins
-* LED ground has ten pins
+* LED power only has two pins, seems to run at 5V
+* Mux powr has three pins, also seems to run at 5V
+* LED and Mux power appear to be on separate rails and not tied together
+* `G0` doesn't directly connect to `GND` on the LED board, although it is tied to ground on the driver board.
 * Exterior rails are grounded
+
 
 ## Shift registers
 
