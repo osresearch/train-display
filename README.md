@@ -2,7 +2,7 @@
 
 128x48 pixels, although only 128x32 are populated.
 Row/Column with shift registers and row-decode to MOSFET.
-Triple scan (three rows on at a time), although the bottom quarter
+Triple scan (three rows on at a time), although the bottom third
 of the display is not populated so really only dual scan.
 All of the shift registers are connected in a single chain
 and interleaved between rows, so image must be clocked in together.
@@ -47,7 +47,9 @@ and interleaved between rows, so image must be clocked in together.
 * LED ground has ten pins
 * Exterior rails are grounded
 
-## Shift register layout
+## Shift registers
+
+Layout is interleaved between the three scans:
 
 ```
 0   3   6   9  12  15  18  21
@@ -57,3 +59,12 @@ and interleaved between rows, so image must be clocked in together.
 
 The output from shift register 23 goes back to the ribbon
 cable pin 4, if daisy chaining displays is desired.
+
+* VDD is 0 - 7V, with 5V recommended
+* Data is rising edge clocked.
+* Latch does not require a clock; output appears after falling
+edge of latch.
+* R-Ext is 560 Ohm, roughly 35 mA constant current drive.
+* 256 LEDs * 35 mA / LED == 9A at full brightness
+* Two daisy-chained displays == 18A @ 5V == 90W
+* Datasheet limits surface mount chip to less than 1W on PCB without heat sinks, so sustained full bright is not recommended.
