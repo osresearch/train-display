@@ -1,0 +1,4 @@
+.*.d
+*.asc
+*.bin
+verilog/*.json
