@@ -5,7 +5,7 @@
  * four bit address and only a single channel instead of RGB.
  */
 //`include "util.v"
-//`include "uart.v"
+`include "uart.v"
 
 module ram(
 	// read domain
@@ -23,12 +23,16 @@ module ram(
 	parameter NUM_BYTES=256;
 
 	reg [DATA_WIDTH-1:0] mem[0:NUM_BYTES-1];
-	reg [DATA_WIDTH-1:0] rd_data;
+	//reg [DATA_WIDTH-1:0] rd_data;
 
         //initial $readmemh("packed0.hex", mem);
+        initial $readmemh("fb-init.hex", mem);
 
+/*
 	always @(posedge rd_clk)
 		rd_data <= mem[rd_addr];
+*/
+	assign rd_data = mem[rd_addr];
 
 	always @(posedge wr_clk)
 		if (wr_enable)
@@ -65,6 +69,8 @@ module top(
 */
 	wire clk = clk_48mhz;
 
+	reg led_r;
+
 	// dual port block ram for the frame buffer
 	// 128 * 48 == 6114 bytes
 	parameter ADDR_WIDTH = 13;
@@ -75,13 +81,13 @@ module top(
 	reg [12:0] write_addr = 0;
 	reg [7:0] write_data = 0;
 
+/*
 	reg [7:0] mem[0:128*48-1];
         initial $readmemh("fb-init.hex", mem);
 	assign read_data = mem[read_addr];
+*/
 
-	reg led_r = 1;
 
-/*
 	ram #(
 		.DATA_WIDTH(8),
 		.ADDR_WIDTH(ADDR_WIDTH),
@@ -95,7 +101,6 @@ module top(
 		.wr_addr(write_addr),
 		.wr_data(write_data)
 	);
-*/
 
 	led_matrix #(
 		.DISP_ADDR_WIDTH(4),
@@ -114,6 +119,74 @@ module top(
 		.data_in(read_data),
 		.data_addr(read_addr)
 	);
+
+	// generate a 3 MHz/12 MHz serial clock from the 48 MHz clock
+	// this is the 3 Mb/s maximum supported by the FTDI chip
+	reg [3:0] baud_clk;
+	always @(posedge clk_48mhz) baud_clk <= baud_clk + 1;
+	assign gpio_38 = baud_clk[3];
+
+	wire [7:0] uart_rxd;
+	wire uart_rxd_strobe;
+
+	reg [7:0] uart_txd;
+	reg uart_txd_strobe;
+
+	uart_rx rxd(
+		.mclk(clk),
+		.reset(reset),
+		.baud_x4(baud_clk[1]), // 48 MHz / 4 == 12 Mhz
+		.serial(serial_rxd),
+		.data(uart_rxd),
+		.data_strobe(uart_rxd_strobe)
+	);
+
+	uart_tx txd(
+		.mclk(clk),
+		.reset(reset),
+		.baud_x1(baud_clk[3]), // 48 MHz / 16 == 3 Mhz
+		.serial(serial_txd),
+		.data(uart_txd),
+		.data_strobe(uart_txd_strobe)
+	);
+
+	reg [15:0] addr_x = 0;
+	reg [15:0] addr_y = 0;
+
+	always @(posedge clk)
+		if (!uart_rxd_strobe)
+		begin
+			led_r <= 1;
+			write_enable <= 0;
+			uart_txd_strobe <= 0;
+		end else
+		begin
+			led_r <= 0;
+			write_enable <= 1;
+			write_data <= uart_rxd;
+
+			// mapping to the frame buffer is a mess
+			//write_addr <= (addr_x * 48) + 47 - addr_y;
+			//write_addr <= addr_x * 48 + addr_y;
+			if (addr_y < 16)
+				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + (32 + addr_y);
+			else
+				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + ( 0 + addr_y);
+
+			// echo it
+			uart_txd <= uart_rxd;
+			uart_txd_strobe <= 1;
+
+			if (addr_y < 31)
+				addr_y <= addr_y + 1;
+			else begin
+				addr_y <= 0;
+				if (addr_x < 127)
+					addr_x <= addr_x + 1;
+				else
+					addr_x <= 0;
+			end
+		end
 
 endmodule
 
@@ -193,7 +266,7 @@ module led_matrix(
 			end else begin
 				// redraw the same scan line a few times at different brightness levels
 				data_addr <= data_addr - DISPLAY_WIDTH;
-				brightness <= brightness + 8'h1c;
+				brightness <= brightness + 8'h18;
 			end
 
 			// latch this data and ensure that the correct matrix row is selected
