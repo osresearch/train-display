@@ -71,3 +71,14 @@ cable pin 4, if daisy chaining displays is desired.
 * Two daisy-chained displays == 18A @ 5V == 90W
 * Datasheet limits surface mount chip to less than 1W on PCB without heat sinks, so sustained full bright is not recommended.
 * In practice they seem to draw around 2A with all LEDs on
+
+## PWM
+
+![Diagonal gradiant](images/pwm.jpg)
+
+It is possible to dim the entire display by driving a PWM signal
+on the `!EN` pin.
+With a fast enough pixel clock and Binary-Coded-Modulation,
+it is possible to have a decent gradient with only 8 constant
+time scans of each row.
+
