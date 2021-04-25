@@ -241,8 +241,10 @@ module top(
 		.y(addr_y)
 	);
 
+`define MIN_X 2
 `define MIN_Y 64
 	wire [15:0] addr_y_offset = addr_y - `MIN_Y;
+	wire [15:0] addr_x_offset = addr_x - `MIN_X;
 
 	always @(posedge spi_tft_clk)
 	begin
@@ -254,14 +256,14 @@ module top(
 			write_enable <= 1;
 
 			// ignore out of bound writes, otherwise rearrange to match the frame buffer
-			if (addr_y < `MIN_Y || addr_y >= `MIN_Y + 32 || addr_x >= 128)
+			if (addr_y < `MIN_Y || addr_y >= `MIN_Y + 32 || addr_x < `MIN_X || addr_x >= `MIN_X + 128)
 				write_enable <= 0;
 			else
 			if (addr_y_offset < 16)
-				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + (32 + addr_y_offset);
+				write_addr <= addr_x_offset[3:0] * 384 + addr_x_offset[7:4] * 48 + (32 + addr_y_offset);
 			else
 			if (addr_y_offset < 32)
-				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + ( 0 + addr_y_offset);
+				write_addr <= addr_x_offset[3:0] * 384 + addr_x_offset[7:4] * 48 + ( 0 + addr_y_offset);
 		
 			// average the RGB to make grayscale
 			write_data <= spi_tft_r + spi_tft_b + spi_tft_r;
