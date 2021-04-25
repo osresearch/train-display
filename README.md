@@ -1,7 +1,7 @@
 ## NS Train Displays
 ![NS train speeding by, with a display on the side under the cab](images/train.jpg)
 
-The [Nederlandse Spoorweeg](https://en.wikipedia.org/wiki/Nederlandse_Spoorwegen)
+The [Nederlandse Spoorwegen (NS)](https://en.wikipedia.org/wiki/Nederlandse_Spoorwegen)
 auctioned parts of their older trains and some folks at [RevSpace in Den Haag](https://revspace.nl/Main_Page)
 organized a [group buy of the LED display modules](https://revspace.nl/Treinonderdelen).
 The original control computers need an odd voltage and listen for multi-drop RS485 with
