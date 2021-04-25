@@ -6,6 +6,7 @@
  */
 //`include "util.v"
 `include "uart.v"
+`include "spi_display.v"
 
 module ram(
 	// read domain
@@ -23,16 +24,14 @@ module ram(
 	parameter NUM_BYTES=256;
 
 	reg [DATA_WIDTH-1:0] mem[0:NUM_BYTES-1];
-	//reg [DATA_WIDTH-1:0] rd_data;
+	reg [DATA_WIDTH-1:0] rd_data;
 
         //initial $readmemh("packed0.hex", mem);
         initial $readmemh("fb-init.hex", mem);
 
-/*
 	always @(posedge rd_clk)
 		rd_data <= mem[rd_addr];
-*/
-	assign rd_data = mem[rd_addr];
+	//assign rd_data = mem[rd_addr];
 
 	always @(posedge wr_clk)
 		if (wr_enable)
@@ -46,8 +45,15 @@ module top(
 	output spi_cs,
 	output led_r,
 
-	output gpio_38,
+	output gpio_38, // debug
 
+	// SPI display input from Pi
+	input gpio_45, // cs
+	input gpio_47, // dc
+	input gpio_46, // di
+	input gpio_2, // clk
+
+	// LED display module
 	output gpio_23, // data out
 	output gpio_25, // latch
 	output gpio_26, // clk
@@ -87,6 +93,18 @@ module top(
 	assign read_data = mem[read_addr];
 */
 
+`ifdef UART_DISPLAY
+	// memory writes are in the uart domain
+	wire wr_clk = clk;
+`else
+	// memory writes are in the spi_clk domain
+	wire spi_tft_cs = gpio_45;
+	wire spi_tft_dc = gpio_47;
+	wire spi_tft_di = gpio_46;
+	wire spi_tft_clk = gpio_2;
+	wire wr_clk = spi_tft_clk;
+`endif
+
 
 	ram #(
 		.DATA_WIDTH(8),
@@ -96,7 +114,7 @@ module top(
 		.rd_clk(clk),
 		.rd_addr(read_addr),
 		.rd_data(read_data),
-		.wr_clk(clk),
+		.wr_clk(wr_clk),
 		.wr_enable(write_enable),
 		.wr_addr(write_addr),
 		.wr_data(write_data)
@@ -150,6 +168,7 @@ module top(
 		.data_strobe(uart_txd_strobe)
 	);
 
+`ifdef UART_DISPLAY
 	reg [15:0] addr_x = 0;
 	reg [15:0] addr_y = 0;
 
@@ -187,6 +206,64 @@ module top(
 					addr_x <= 0;
 			end
 		end
+`else
+	// SPI display from the Raspberry Pi
+	wire spi_tft_strobe;
+	wire [15:0] spi_tft_pixels;
+	wire [15:0] addr_x;
+	wire [15:0] addr_y;
+	wire [5:0] spi_tft_r = { spi_tft_pixels[15:11], 1'b0 };
+	wire [5:0] spi_tft_g = spi_tft_pixels[10:5];
+	wire [5:0] spi_tft_b = { spi_tft_pixels[4:0], 1'b0 };
+
+	spi_display spi_display0(
+		// windowing is not yet supported
+		//.x_start(x_start),
+		//.y_start(y_start),
+		//.x_end(x_end),
+		//.y_end(y_end),
+
+		// debug serial port
+		.uart_strobe(uart_txd_strobe),
+		.uart_data(uart_txd),
+
+		// physical interface
+		.spi_cs(spi_tft_cs),
+		.spi_dc(spi_tft_dc),
+		.spi_di(spi_tft_di),
+		.spi_clk(spi_tft_clk),
+
+		// incoming data
+		.pixels(spi_tft_pixels),
+		.strobe(spi_tft_strobe),
+		.x(addr_x),
+		.y(addr_y)
+	);
+
+	always @(posedge spi_tft_clk)
+	begin
+		write_enable <= 0;
+
+		if (spi_tft_strobe)
+		begin
+			// new pixel!
+			write_enable <= 1;
+
+			// ignore out of bound writes, otherwise rearrange to match the frame buffer
+			if (addr_y >= 32 || addr_x >= 128)
+				write_enable <= 0;
+			else
+			if (addr_y < 16)
+				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + (32 + addr_y);
+			else
+			if (addr_y < 32)
+				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + ( 0 + addr_y);
+		
+			// average the RGB to make grayscale
+			write_data <= spi_tft_r + spi_tft_b + spi_tft_r;
+		end
+	end
+`endif
 
 endmodule
 
