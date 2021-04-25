@@ -82,3 +82,25 @@ With a fast enough pixel clock and Binary-Coded-Modulation,
 it is possible to have a decent gradient with only 8 constant
 time scans of each row.
 
+## Pi setup
+![xterm prompt on the panel](images/pi-display.jpg)
+
+* https://learn.watterott.com/hats/rpi-display/fbtft-install/
+* Activate console on display, no fbcp, no calibrator, no tslib
+
+SPI0 port pins on the PI:
+* 18 == GPIO24 = Data/Command
+* 19 == GPIO10 = Data out
+* 20 == GND
+* 21 == GPIO09 = Data in (unused)
+* 23 == GPIO11 = SCLK
+* 24 == GPIO8  = CE0
+* 25 == GND
+
+On the FPGA:
+```
+	wire spi_tft_cs = gpio_45;
+	wire spi_tft_dc = gpio_47;
+	wire spi_tft_di = gpio_46;
+	wire spi_tft_clk = gpio_2;
+```
