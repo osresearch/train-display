@@ -1,13 +1,23 @@
-![Indoor LED display component side](images/indoor-pcb.jpg)
+## NS Train Displays
+![NS train speeding by, with a display on the side under the cab](images/train.jpg)
 
-128x48 pixels, although only 128x32 are populated.
-Row/Column with shift registers and row-decode to MOSFET.
-Triple scan (three rows on at a time), although the bottom third
-of the display is not populated so really only dual scan.
-All of the shift registers are connected in a single chain
-and interleaved between rows, so image must be clocked in together.
+The [Nederlandse Spoorweeg](https://en.wikipedia.org/wiki/Nederlandse_Spoorwegen)
+auctioned parts of their older trains and some folks at [RevSpace in Den Haag](https://revspace.nl/Main_Page)
+organized a [group buy of the LED display modules](https://revspace.nl/Treinonderdelen).
+The original control computers need an odd voltage and listen for multi-drop RS485 with
+no published protocol, so this is a way to replace it with an iCE40 FPGA and optionally
+a Raspberry Pi.
 
 ## Components
+
+![Indoor LED display component side](images/indoor-pcb.jpg)
+
+
+The indoor modules are 128x48 pixels, although only 128x32 are populated.
+Row/Column with shift registers and row-decode to MOSFET.
+Eight columns of all 32 pixels are on at a time; the layout is very weird.
+All of the shift registers are connected in a single chain
+and interleaved between rows, so image must be clocked out to match.
 
 * 24x [TB62706](datasheets/TB62706.pdf) - 16-bit shift register (
 * 16x [NTD20NO3L27](datasheets/NTD20N03L27-D.PDF) - N-Channel MOSFET (high-side row switch)
