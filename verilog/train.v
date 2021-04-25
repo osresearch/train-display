@@ -224,6 +224,7 @@ module top(
 		//.y_end(y_end),
 
 		// debug serial port
+		.debug(led_r),
 		.uart_strobe(uart_txd_strobe),
 		.uart_data(uart_txd),
 
@@ -240,6 +241,9 @@ module top(
 		.y(addr_y)
 	);
 
+`define MIN_Y 64
+	wire [15:0] addr_y_offset = addr_y - `MIN_Y;
+
 	always @(posedge spi_tft_clk)
 	begin
 		write_enable <= 0;
@@ -250,14 +254,14 @@ module top(
 			write_enable <= 1;
 
 			// ignore out of bound writes, otherwise rearrange to match the frame buffer
-			if (addr_y >= 32 || addr_x >= 128)
+			if (addr_y < `MIN_Y || addr_y >= `MIN_Y + 32 || addr_x >= 128)
 				write_enable <= 0;
 			else
-			if (addr_y < 16)
-				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + (32 + addr_y);
+			if (addr_y_offset < 16)
+				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + (32 + addr_y_offset);
 			else
-			if (addr_y < 32)
-				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + ( 0 + addr_y);
+			if (addr_y_offset < 32)
+				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + ( 0 + addr_y_offset);
 		
 			// average the RGB to make grayscale
 			write_data <= spi_tft_r + spi_tft_b + spi_tft_r;
@@ -332,6 +336,8 @@ module led_matrix(
 			// start over on reading the frame buffer
 			if (addr == 0)
 				data_addr <= 0;
+			// hold the clock high
+			clk_out <= 1;
 		end else
 		if (x_index == DISPLAY_WIDTH)
 		begin
@@ -353,7 +359,8 @@ module led_matrix(
 
 			// start a new scan line
 			x_index <= 0;
-
+			// hold the clock high
+			clk_out <= 1;
 		end else
 		if (clk_out == 1)
 		begin
@@ -366,11 +373,13 @@ module led_matrix(
 				data_out <= 0;
 
 			x_index <= x_index + 1;
+
+			// start the fetch for the next address
+			data_addr <= data_addr + 1;
 		end else begin
 			// rising edge of the clock, new data should be ready
 			// and stable, so mark it
 			clk_out <= 1;
-			data_addr <= data_addr + 1;
 		end
 	end
 endmodule
