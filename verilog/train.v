@@ -121,8 +121,12 @@ module top(
 	);
 
 	led_matrix #(
-		.DISP_ADDR_WIDTH(4),
-		.DISPLAY_WIDTH(13'd384),
+		// internal display 4 address lines, 32 * 128
+		//.DISP_ADDR_WIDTH(4),
+		//.DISPLAY_WIDTH(13'd384), // 24 * 16
+		// external display is 3 address lines, 32 * 104
+		.DISP_ADDR_WIDTH(3),
+		.DISPLAY_WIDTH(13'd416), // 26 * 16
 		.FB_ADDR_WIDTH(ADDR_WIDTH)
 	) disp0(
 		.clk(clk),
@@ -256,14 +260,16 @@ module top(
 			write_enable <= 1;
 
 			// ignore out of bound writes, otherwise rearrange to match the frame buffer
-			if (addr_y < `MIN_Y || addr_y >= `MIN_Y + 32 || addr_x < `MIN_X || addr_x >= `MIN_X + 128)
+			if (addr_y < `MIN_Y || addr_y >= `MIN_Y + 32 || addr_x < `MIN_X || addr_x >= `MIN_X + 104)
 				write_enable <= 0;
 			else
 			if (addr_y_offset < 16)
-				write_addr <= addr_x_offset[3:0] * 384 + addr_x_offset[7:4] * 48 + (32 + addr_y_offset);
+				//write_addr <= addr_x_offset[3:0] * 384 + addr_x_offset[7:4] * 48 + (32 + addr_y_offset);
+				write_addr <= addr_x_offset[2:0] * 416 + addr_x_offset[7:3] * 32 + (addr_y_offset + 16);
 			else
 			if (addr_y_offset < 32)
-				write_addr <= addr_x_offset[3:0] * 384 + addr_x_offset[7:4] * 48 + ( 0 + addr_y_offset);
+				//write_addr <= addr_x_offset[3:0] * 384 + addr_x_offset[7:4] * 48 + ( 0 + addr_y_offset);
+				write_addr <= addr_x_offset[2:0] * 416 + addr_x_offset[7:3] * 32 + (addr_y_offset - 16);
 		
 			// average the RGB to make grayscale
 			write_data <= spi_tft_r + spi_tft_b + spi_tft_r;
