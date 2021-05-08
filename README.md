@@ -36,7 +36,7 @@ and interleaved between rows, so image must be clocked out to match.
 | VDD (LED)| 11  | 12  | Latch (SR)|
 | VDD (LED)| 13  | 14  | Clock (SR)|
 | VDD (LED)| 15  | 16  | !E (Mux)  |
-| GND      | 17  | 18  | A3 (Mux)  |
+| VDD (LED)| 17  | 18  | A3 (Mux)  |
 | GND      | 19  | 20  | A2 (Mux)  |
 | GND      | 21  | 22  | A1 (Mux)  |
 | GND      | 23  | 24  | A0 (Mux)  |
