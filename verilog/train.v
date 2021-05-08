@@ -61,29 +61,35 @@ module top(
 	output gpio_32, // a3
 	output gpio_35, // a2
 	output gpio_31, // a1
-	output gpio_37 // a0
+	output gpio_37, // a0
+	output gpio_34 // data out 2
 );
 	assign spi_cs = 1; // it is necessary to turn off the SPI flash chip
 	reg reset = 0;
 	wire clk_48mhz;
 	SB_HFOSC inthosc(.CLKHFPU(1'b1), .CLKHFEN(1'b1), .CLKHF(clk_48mhz));
 
-/*
+	// 12 Mhz output clock
 	reg clk;
 	always @(posedge clk_48mhz)
 		clk = !clk;
-*/
+/*
+	// 24 Mhz output clock, needs better wires
 	wire clk = clk_48mhz;
+*/
 
 	reg led_r;
 
 	// dual port block ram for the frame buffer
 	// 128 * 48 == 6114 bytes
+	// 2 * 104 * 32 == 6656 bytes
 	parameter ADDR_WIDTH = 13;
 	wire [ADDR_WIDTH-1:0] read_addr;
-	wire [7:0] read_data;
+	wire [7:0] read_data0;
+	wire [7:0] read_data1;
 
-	reg write_enable = 0;
+	reg write_enable0 = 0;
+	reg write_enable1 = 0;
 	reg [12:0] write_addr = 0;
 	reg [7:0] write_data = 0;
 
@@ -113,11 +119,51 @@ module top(
 	) fb0(
 		.rd_clk(clk),
 		.rd_addr(read_addr),
-		.rd_data(read_data),
+		.rd_data(read_data0),
 		.wr_clk(wr_clk),
-		.wr_enable(write_enable),
+		.wr_enable(write_enable0),
 		.wr_addr(write_addr),
 		.wr_data(write_data)
+	);
+	ram #(
+		.DATA_WIDTH(8),
+		.ADDR_WIDTH(ADDR_WIDTH),
+		.NUM_BYTES(128 * 48)
+	) fb1(
+		.rd_clk(clk),
+		.rd_addr(read_addr),
+		.rd_data(read_data1),
+		.wr_clk(wr_clk),
+		.wr_enable(write_enable1),
+		.wr_addr(write_addr),
+		.wr_data(write_data)
+	);
+
+
+	// outside display module
+	assign gpio_32 = 0;
+
+	led_matrix #(
+		// internal display 4 address lines, 32 * 128
+		//.DISP_ADDR_WIDTH(4),
+		//.DISPLAY_WIDTH(13'd384), // 24 * 16
+		// external display is 3 address lines, 32 * 104
+		.DISP_ADDR_WIDTH(3),
+		.DISPLAY_WIDTH(416), // 26 * 16 * 2
+		.FB_ADDR_WIDTH(ADDR_WIDTH)
+	) disp0(
+		.clk(clk),
+		.reset(reset),
+		// physical interface
+		.data_out(gpio_34),
+		.clk_out(gpio_26),
+		.latch_out(gpio_25),
+		.enable_out(gpio_27),
+		//.addr_out({gpio_32, gpio_35, gpio_31, gpio_37}), // inside 4 bits
+		.addr_out({gpio_35, gpio_31, gpio_37}), // outside 3 address bits
+		// logical interface
+		.data_in(read_data0),
+		.data_addr(read_addr)
 	);
 
 	led_matrix #(
@@ -126,20 +172,16 @@ module top(
 		//.DISPLAY_WIDTH(13'd384), // 24 * 16
 		// external display is 3 address lines, 32 * 104
 		.DISP_ADDR_WIDTH(3),
-		.DISPLAY_WIDTH(13'd416), // 26 * 16
+		.DISPLAY_WIDTH(416), // 26 * 16 * 2
 		.FB_ADDR_WIDTH(ADDR_WIDTH)
-	) disp0(
+	) disp1(
 		.clk(clk),
 		.reset(reset),
-		// physical interface
+		// physical interface (only data is used)
 		.data_out(gpio_23),
-		.clk_out(gpio_26),
-		.latch_out(gpio_25),
-		.enable_out(gpio_27),
-		.addr_out({gpio_32, gpio_35, gpio_31, gpio_37}),
 		// logical interface
-		.data_in(read_data),
-		.data_addr(read_addr)
+		.data_in(read_data1),
+		//.data_addr(read_addr)
 	);
 
 	// generate a 3 MHz/12 MHz serial clock from the 48 MHz clock
@@ -247,33 +289,33 @@ module top(
 
 `define MIN_X 2
 `define MIN_Y 64
+`define PANEL_WIDTH 104
+`define PANEL_HEIGHT 32
 	wire [15:0] addr_y_offset = addr_y - `MIN_Y;
-	wire [15:0] addr_x_offset = addr_x - `MIN_X;
+	wire [15:0] addr_x_offset0 = addr_x - `MIN_X;
+	wire [15:0] addr_x_offset1 = addr_x - `MIN_X - `PANEL_WIDTH;
+	wire panel = `MIN_X + `PANEL_WIDTH <= addr_x;
+	wire [15:0] addr_x_offset = panel ? addr_x_offset1 : addr_x_offset0;
 
 	always @(posedge spi_tft_clk)
-	begin
-		write_enable <= 0;
+	if (spi_tft_strobe
+	&& `MIN_Y <= addr_y && addr_y < `MIN_Y + `PANEL_HEIGHT
+	&& `MIN_X <= addr_x && addr_x < `MIN_X + 2 * `PANEL_WIDTH
+	) begin
+		// new pixel!
+		write_enable0 <= panel == 0;
+		write_enable1 <= panel == 1;
 
-		if (spi_tft_strobe)
-		begin
-			// new pixel!
-			write_enable <= 1;
-
-			// ignore out of bound writes, otherwise rearrange to match the frame buffer
-			if (addr_y < `MIN_Y || addr_y >= `MIN_Y + 32 || addr_x < `MIN_X || addr_x >= `MIN_X + 104)
-				write_enable <= 0;
-			else
-			if (addr_y_offset < 16)
-				//write_addr <= addr_x_offset[3:0] * 384 + addr_x_offset[7:4] * 48 + (32 + addr_y_offset);
-				write_addr <= addr_x_offset[2:0] * 416 + addr_x_offset[7:3] * 32 + (addr_y_offset + 16);
-			else
-			if (addr_y_offset < 32)
-				//write_addr <= addr_x_offset[3:0] * 384 + addr_x_offset[7:4] * 48 + ( 0 + addr_y_offset);
-				write_addr <= addr_x_offset[2:0] * 416 + addr_x_offset[7:3] * 32 + (addr_y_offset - 16);
-		
-			// average the RGB to make grayscale
-			write_data <= spi_tft_r + spi_tft_b + spi_tft_r;
-		end
+		if (addr_y_offset < 16)
+			write_addr <= addr_x_offset[2:0] * 4 * `PANEL_WIDTH + addr_x_offset[7:3] * `PANEL_HEIGHT + (addr_y_offset + 16);
+		else
+			write_addr <= addr_x_offset[2:0] * 4 * `PANEL_WIDTH + addr_x_offset[7:3] * `PANEL_HEIGHT+ (addr_y_offset - 16);
+	
+		// average the RGB to make grayscale
+		write_data <= spi_tft_r + spi_tft_b + spi_tft_r;
+	end else begin
+		write_enable0 <= 0;
+		write_enable1 <= 0;
 	end
 `endif
 
