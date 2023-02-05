@@ -99,6 +99,7 @@ module top(
 	assign read_data = mem[read_addr];
 */
 
+`define UART_DISPLAY
 `ifdef UART_DISPLAY
 	// memory writes are in the uart domain
 	wire wr_clk = clk;
@@ -214,6 +215,11 @@ module top(
 		.data_strobe(uart_txd_strobe)
 	);
 
+`define MIN_X 2
+`define MIN_Y 64
+`define PANEL_WIDTH 104
+`define PANEL_HEIGHT 32
+
 `ifdef UART_DISPLAY
 	reg [15:0] addr_x = 0;
 	reg [15:0] addr_y = 0;
@@ -222,21 +228,25 @@ module top(
 		if (!uart_rxd_strobe)
 		begin
 			led_r <= 1;
-			write_enable <= 0;
+			write_enable0 <= 0;
+			write_enable1 <= 0;
 			uart_txd_strobe <= 0;
 		end else
 		begin
 			led_r <= 0;
-			write_enable <= 1;
+			write_enable0 <= 1;
+			write_enable1 <= 1;
 			write_data <= uart_rxd;
 
 			// mapping to the frame buffer is a mess
 			//write_addr <= (addr_x * 48) + 47 - addr_y;
 			//write_addr <= addr_x * 48 + addr_y;
+			// write_addr <= addr_x_offset[2:0] * 4 * `PANEL_WIDTH + addr_x_offset[7:3] * `PANEL_HEIGHT + (addr_y_offset + 16);
+			//write_addr <= addr_x_offset[2:0] * 4 * `PANEL_WIDTH + addr_x_offset[7:3] * `PANEL_HEIGHT+ (addr_y_offset - 16);
 			if (addr_y < 16)
-				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + (32 + addr_y);
+				write_addr <= addr_x[2:0] * 4 * `PANEL_WIDTH + addr_x[7:3] * `PANEL_HEIGHT + (addr_y + 16);
 			else
-				write_addr <= addr_x[3:0] * 384 + addr_x[7:4] * 48 + ( 0 + addr_y);
+				write_addr <= addr_x[2:0] * 4 * `PANEL_WIDTH + addr_x[7:3] * `PANEL_HEIGHT + (addr_y - 16);
 
 			// echo it
 			uart_txd <= uart_rxd;
@@ -287,10 +297,6 @@ module top(
 		.y(addr_y)
 	);
 
-`define MIN_X 2
-`define MIN_Y 64
-`define PANEL_WIDTH 104
-`define PANEL_HEIGHT 32
 	wire [15:0] addr_y_offset = addr_y - `MIN_Y;
 	wire [15:0] addr_x_offset0 = addr_x - `MIN_X;
 	wire [15:0] addr_x_offset1 = addr_x - `MIN_X - `PANEL_WIDTH;
