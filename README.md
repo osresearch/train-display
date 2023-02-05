@@ -92,6 +92,18 @@ With a fast enough pixel clock and Binary-Coded-Modulation,
 it is possible to have a decent gradient with only 8 constant
 time scans of each row.
 
+## HDMI interface
+
+![HDMI Interface](images/hdmi.jpg)
+
+A prototype using the [IT6604E](datasheets/it6604e.pdf) HDMI
+deserializer in an old USB HDMI capture device.  It works with
+as a low resolution display, although that part is EOL'ed.
+Eventually a board with a [TI TFP401](https://cdn-shop.adafruit.com/datasheets/tfp401.pdf)
+based on [Adafruit design](https://www.adafruit.com/product/2218)
+would be a better choice.  This would eliminate the need to do
+the special Pi setup and also enable OpenGL support.
+
 ## Pi setup
 ![xterm prompt on the panel](images/pi-display.jpg)
 
