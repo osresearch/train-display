@@ -8,6 +8,17 @@
 `include "uart.v"
 `include "spi_display.v"
 
+`define HDMI_DISPLAY
+`undef SPI_DISPLAY
+`undef UART_DISPLAY
+
+`define MIN_X 2
+`define MIN_Y 64
+`define PANEL_WIDTH 104
+`define PANEL_HEIGHT 32
+`define PANEL_PITCH 128
+
+
 module ram(
 	// read domain
 	input rd_clk,
@@ -38,6 +49,75 @@ module ram(
 			mem[wr_addr] <= wr_data;
 endmodule
 
+// for speed of receiving the HDMI signals, the framebuffer is stored in
+// normal layout with a power-of-two pitch.
+// the actual LED matrix might be weird, so turn a linear offset
+// into a framebuffer offset.
+//
+// external display is 104 wide 32 high, but mapped like:
+//
+// 10 skip eight    30 repeat 13 times 190
+// |           \    |                  |
+// 1f           \   3f                 19f -> go back to second column
+// 00 1a0        \->20                 180
+// |  |             |                  |
+// 0f 1af           2f                 18f
+// 
+
+module display_mapper(
+	input [12:0] linear_addr,
+	output [12:0] ram_addr
+);
+	parameter PANEL_SHIFT_WIDTH = (13 * 32) / 32;
+
+	wire y_bank = linear_addr[4];
+	wire [4:0] y_addr = linear_addr[3:0] + (y_bank ? 0 : 16);
+
+	wire [12:0] x_value = linear_addr[12:5];
+	wire [12:0] x_offset;
+	reg [2:0] x_minor;
+	reg [12:0] x_major;
+
+	always @(*)
+	begin
+		if (x_value >= 7 * PANEL_SHIFT_WIDTH) begin
+			x_minor = 7;
+			x_major = x_value - 7 * PANEL_SHIFT_WIDTH;
+		end else
+		if (x_value >= 6 * PANEL_SHIFT_WIDTH) begin
+			x_minor = 6;
+			x_major = x_value - 6 * PANEL_SHIFT_WIDTH;
+		end else
+		if (x_value >= 5 * PANEL_SHIFT_WIDTH) begin
+			x_minor = 5;
+			x_major = x_value - 5 * PANEL_SHIFT_WIDTH;
+		end else
+		if (x_value >= 4 * PANEL_SHIFT_WIDTH) begin
+			x_minor = 4;
+			x_major = x_value - 4 * PANEL_SHIFT_WIDTH;
+		end else
+		if (x_value >= 3 * PANEL_SHIFT_WIDTH) begin
+			x_minor = 3;
+			x_major = x_value - 3 * PANEL_SHIFT_WIDTH;
+		end else
+		if (x_value >= 2 * PANEL_SHIFT_WIDTH) begin
+			x_minor = 2;
+			x_major = x_value - 2 * PANEL_SHIFT_WIDTH;
+		end else
+		if (x_value >= 1 * PANEL_SHIFT_WIDTH) begin
+			x_minor = 1;
+			x_major = x_value - 1 * PANEL_SHIFT_WIDTH;
+		end else begin
+			x_minor = 0;
+			x_major = x_value;
+		end
+	end
+
+	wire [12:0] x_addr = x_major*8 + x_minor;
+
+	assign ram_addr = x_addr + y_addr * `PANEL_PITCH;
+endmodule
+
 
 module top(
 	output serial_txd,
@@ -46,6 +126,7 @@ module top(
 	output led_r,
 
 	output gpio_38, // debug
+	output gpio_42, // debug
 
 	// SPI display input from Pi
 	input gpio_45, // cs
@@ -81,8 +162,8 @@ module top(
 	reg led_r;
 
 	// dual port block ram for the frame buffer
-	// 128 * 48 == 6114 bytes
-	// 2 * 104 * 32 == 6656 bytes
+	// 128 * 48 == 6114 bytes (inside display)
+	// 2 * 104 * 32 == 6656 bytes (ouside display)
 	parameter ADDR_WIDTH = 13;
 	wire [ADDR_WIDTH-1:0] read_addr;
 	wire [7:0] read_data0;
@@ -90,7 +171,7 @@ module top(
 
 	reg write_enable0 = 0;
 	reg write_enable1 = 0;
-	reg [12:0] write_addr = 0;
+	reg [ADDR_WIDTH-1:0] write_addr = 0;
 	reg [7:0] write_data = 0;
 
 /*
@@ -99,11 +180,11 @@ module top(
 	assign read_data = mem[read_addr];
 */
 
-`define UART_DISPLAY
 `ifdef UART_DISPLAY
 	// memory writes are in the uart domain
 	wire wr_clk = clk;
-`else
+`endif
+`ifdef SPI_DISPLAY
 	// memory writes are in the spi_clk domain
 	wire spi_tft_cs = gpio_45;
 	wire spi_tft_dc = gpio_47;
@@ -111,12 +192,21 @@ module top(
 	wire spi_tft_clk = gpio_2;
 	wire wr_clk = spi_tft_clk;
 `endif
+`ifdef HDMI_DISPLAY
+	// memory writes are in the hdmi pclk domain
+	// todo: wider inputs for the incoming data
+	wire hdmi_vsync = gpio_2;
+	wire hdmi_en = gpio_46;
+	wire hdmi_clk = gpio_47;
+	wire hdmi_di = gpio_45;
+	wire wr_clk = hdmi_clk;
+`endif
 
 
 	ram #(
 		.DATA_WIDTH(8),
 		.ADDR_WIDTH(ADDR_WIDTH),
-		.NUM_BYTES(128 * 48)
+		.NUM_BYTES(`PANEL_PITCH * `PANEL_HEIGHT)
 	) fb0(
 		.rd_clk(clk),
 		.rd_addr(read_addr),
@@ -129,7 +219,7 @@ module top(
 	ram #(
 		.DATA_WIDTH(8),
 		.ADDR_WIDTH(ADDR_WIDTH),
-		.NUM_BYTES(128 * 48)
+		.NUM_BYTES(`PANEL_PITCH * `PANEL_HEIGHT)
 	) fb1(
 		.rd_clk(clk),
 		.rd_addr(read_addr),
@@ -141,8 +231,12 @@ module top(
 	);
 
 
-	// outside display module
+	// outside display module has 3 address lines, force addr3 == 0
 	assign gpio_32 = 0;
+
+	// turn the linear addresses from the led matrix into frame buffer read addresses for the RAM
+	wire [ADDR_WIDTH-1:0] linear_addr;
+	display_mapper mapper(linear_addr, read_addr);
 
 	led_matrix #(
 		// internal display 4 address lines, 32 * 128
@@ -150,7 +244,7 @@ module top(
 		//.DISPLAY_WIDTH(13'd384), // 24 * 16
 		// external display is 3 address lines, 32 * 104
 		.DISP_ADDR_WIDTH(3),
-		.DISPLAY_WIDTH(416), // 26 * 16 * 2
+		.DISPLAY_WIDTH(416), // 13 columns * 16 * 2
 		.FB_ADDR_WIDTH(ADDR_WIDTH)
 	) disp0(
 		.clk(clk),
@@ -164,7 +258,7 @@ module top(
 		.addr_out({gpio_35, gpio_31, gpio_37}), // outside 3 address bits
 		// logical interface
 		.data_in(read_data0),
-		.data_addr(read_addr)
+		.data_addr(linear_addr)
 	);
 
 	led_matrix #(
@@ -189,7 +283,9 @@ module top(
 	// this is the 3 Mb/s maximum supported by the FTDI chip
 	reg [3:0] baud_clk;
 	always @(posedge clk_48mhz) baud_clk <= baud_clk + 1;
-	assign gpio_38 = baud_clk[3];
+	//assign gpio_38 = baud_clk[3];
+	reg gpio_38;
+	reg gpio_42;
 
 	wire [7:0] uart_rxd;
 	wire uart_rxd_strobe;
@@ -215,14 +311,9 @@ module top(
 		.data_strobe(uart_txd_strobe)
 	);
 
-`define MIN_X 2
-`define MIN_Y 64
-`define PANEL_WIDTH 104
-`define PANEL_HEIGHT 32
-
 `ifdef UART_DISPLAY
-	reg [15:0] addr_x = 0;
-	reg [15:0] addr_y = 0;
+	reg [11:0] addr_x = 0;
+	reg [11:0] addr_y = 0;
 
 	always @(posedge clk)
 		if (!uart_rxd_strobe)
@@ -238,31 +329,26 @@ module top(
 			write_enable1 <= 1;
 			write_data <= uart_rxd;
 
-			// mapping to the frame buffer is a mess
-			//write_addr <= (addr_x * 48) + 47 - addr_y;
-			//write_addr <= addr_x * 48 + addr_y;
-			// write_addr <= addr_x_offset[2:0] * 4 * `PANEL_WIDTH + addr_x_offset[7:3] * `PANEL_HEIGHT + (addr_y_offset + 16);
-			//write_addr <= addr_x_offset[2:0] * 4 * `PANEL_WIDTH + addr_x_offset[7:3] * `PANEL_HEIGHT+ (addr_y_offset - 16);
-			if (addr_y < 16)
-				write_addr <= addr_x[2:0] * 4 * `PANEL_WIDTH + addr_x[7:3] * `PANEL_HEIGHT + (addr_y + 16);
-			else
-				write_addr <= addr_x[2:0] * 4 * `PANEL_WIDTH + addr_x[7:3] * `PANEL_HEIGHT + (addr_y - 16);
+			write_addr <= addr_x + `PANEL_PITCH * addr_y;
 
 			// echo it
 			uart_txd <= uart_rxd;
 			uart_txd_strobe <= 1;
 
-			if (addr_y < 31)
-				addr_y <= addr_y + 1;
-			else begin
-				addr_y <= 0;
-				if (addr_x < 127)
-					addr_x <= addr_x + 1;
+			if (addr_x >= `PANEL_WIDTH)
+			begin
+				addr_x <= 0;
+
+				if (addr_y >= `PANEL_HEIGHT)
+					addr_y <= 0;
 				else
-					addr_x <= 0;
+					addr_y <= addr_y + 1;
+			end else begin
+				addr_x <= addr_x + 1;
 			end
 		end
-`else
+`endif
+`ifdef SPI_DISPLAY
 	// SPI display from the Raspberry Pi
 	wire spi_tft_strobe;
 	wire [15:0] spi_tft_pixels;
@@ -322,6 +408,74 @@ module top(
 	end else begin
 		write_enable0 <= 0;
 		write_enable1 <= 0;
+	end
+`endif
+`ifdef HDMI_DISPLAY
+	reg [11:0] addr_x; // up to 4k
+	reg [11:0] addr_y; // up to 4k
+	reg last_hdmi_en;
+
+	// todo: cut down the number of bits in the offset values
+	wire [6:0] addr_y_offset = addr_y - `MIN_Y;
+	wire [11:0] addr_x_offset0 = addr_x - `MIN_X;
+	wire [11:0] addr_x_offset1 = addr_x - `MIN_X - `PANEL_WIDTH;
+	wire panel = `MIN_X + `PANEL_WIDTH <= addr_x;
+	wire [11:0] addr_x_offset = panel ? addr_x_offset1 : addr_x_offset0;
+	wire x_in_range = (`MIN_X <= addr_x) && (addr_x < `MIN_X + 2 * `PANEL_WIDTH);
+	wire y_in_range = (`MIN_Y <= addr_y) && (addr_y < `MIN_Y + 1 * `PANEL_HEIGHT);
+	wire in_range = x_in_range && y_in_range;
+	//wire write_enable0 = in_range && panel == 0;
+	//wire write_enable1 = in_range && panel == 1;
+
+
+	// vsync  000010000000000000000
+	// en     111000000101010101010
+	always @(posedge hdmi_clk)
+	begin
+		gpio_38 <= hdmi_vsync;
+		gpio_42 <= hdmi_en;
+	end
+
+	always @(posedge hdmi_clk)
+	begin
+		write_enable0 <= 0;
+		write_enable1 <= 0;
+		last_hdmi_en <= hdmi_en;
+
+		if (hdmi_vsync == 1)
+		begin
+			// high vsync restarts the x and y, DE is not set yet
+			led_r <= 0;
+			addr_x <= 0;
+			addr_y <= 0;
+		end
+		else
+		if (hdmi_en == 0)
+		begin
+			// do nothing until we have pixel data
+			led_r <= 1;
+		end
+		else if (last_hdmi_en == 0)
+		begin
+			// start of a new scan line
+			last_hdmi_en <= 1;
+			addr_x <= 0;
+			addr_y <= addr_y + 1;
+		end else begin
+			// normal pixel data, EN=1 and last EN=1
+			addr_x <= addr_x + 1;
+
+			// store this new pixel if it is in range
+			write_enable0 <= (panel == 0) && in_range;
+			write_enable1 <= (panel == 1) && in_range;
+
+			// store this with a fixed pitch
+			write_addr <= addr_x_offset + addr_y_offset * `PANEL_PITCH;
+		
+			// todo: average the RGB to make grayscale
+			write_data <= !hdmi_di ? 8'h80 : 8'h00;
+			//write_data <= addr_x_offset[0] ^ addr_y_offset[0] ? 8'h80 : 8'h00;
+		end
 	end
 `endif
 
