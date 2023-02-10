@@ -18,8 +18,9 @@
  * Data island period is encoded with TERC4; can we ignore it?
  *
  */
+`default_nettype none
 `include "hdmi_pll.v"
-//`include "tmds.v"
+`include "tmds.v"
 
 
 // Deserialize 10 input bits into a 10-bit register,
@@ -30,8 +31,13 @@ module hdmi_shift(
 	input clk,
 	input bit_clk,
 	input in_p,
-	output [7:0] out,
-	output valid
+	output bit,
+	output [7:0] data,
+	output data_valid,
+	output [1:0] sync,
+	output sync_valid,
+	output [3:0] ctrl,
+	output ctrl_valid
 );
 	reg [9:0] shift;
 	reg [9:0] latch;
@@ -47,35 +53,32 @@ module hdmi_shift(
 		.D_IN_0(in0),
 		.D_IN_1(in1)
 	);
-/*
-	reg in0;
-	reg in1;
-	always @(posedge bit_clk)
-		in0 <= in_p;
-	always @(negedge bit_clk)
-		in1 <= in_p;
-*/
 
 	// DDR on the bit clock allows us to run at half the speed
 	always @(posedge bit_clk)
 		shift <= { shift[7:0], in1, in0 };
+	assign bit = in0;
 
 	// capture all of the deserialized bits on the pixel clock
 	always @(posedge clk)
 		latch <= shift;
 
-/*
-	// decode the pixel bits
+	// decode the TMDS encoded bits; ignore the terc4 for now
+	wire [3:0] terc4;
+
 	tmds_decode decoder(
+		// inputs
 		.clk(clk),
 		.in(latch),
-		.out(out),
-		.valid(valid)
-		.ctrl_sync(sync),
-		.ctrl_data(terc4)
+
+		// outputs
+		.data_valid(data_valid),
+		.sync_valid(sync_valid),
+		.ctrl_valid(ctrl_valid),
+		.data(data),
+		.sync(sync),
+		.ctrl(terc4)
 	);
-*/
-	assign out = latch[7:0];
 endmodule
 
 module hdmi_raw(
@@ -83,14 +86,16 @@ module hdmi_raw(
 	input d1_p,
 	input d2_p,
 	input clk_p,
+	input [3:0] pll_delay,
 	output [7:0] d0,
 	output [7:0] d1,
 	output [7:0] d2,
-	output valid,
+	output data_valid,
+	output sync_valid,
 	output hsync,
 	output vsync,
-	output clk,
 	output locked,
+	output clk,
 	output bit_clk
 );
 	wire clk;
@@ -107,7 +112,8 @@ module hdmi_raw(
 	hdmi_pll pll(
 		.clock_in(clk),
 		.clock_out(bit_clk),
-		.locked(locked)
+		.locked(locked),
+		.delay(pll_delay)
 	);
 
 	// the blue channel is where the control codes and TERC4
@@ -116,33 +122,35 @@ module hdmi_raw(
 	// TODO: implement the data island detection using the
 	// hdmi_control bits
 	wire data_valid;
-	wire [3:0] terc4;
-	wire [1:0] hdmi_control;
-	wire hsync = hdmi_control[0];
-	wire vsync = hdmi_control[1];
+	wire sync_valid;
+	wire [1:0] sync;
+	wire hsync = sync[0];
+	wire vsync = sync[1];
 
 	hdmi_shift d0_shift(
 		.clk(clk),
 		.bit_clk(bit_clk),
 		.in_p(d0_p),
-		.out(d0),
-		//.valid(data_valid),
-		//.terc4(terc4),
-		//.cntrl(hdmi_control)
+		.data(d0),
+		.data_valid(data_valid),
+		.sync(sync),
+		.sync_valid(sync_valid)
 	);
 
+	// red has audio samples in the data island period
 	hdmi_shift d1_shift(
 		.clk(clk),
 		.bit_clk(bit_clk),
 		.in_p(d1_p),
-		.out(d1)
+		.data(d1)
 	);
 
+	// green has audio samples in the data island period
 	hdmi_shift d2_shift(
 		.clk(clk),
 		.bit_clk(bit_clk),
 		.in_p(d2_p),
-		.out(d2)
+		.data(d2)
 	);
 endmodule
 
@@ -175,13 +183,19 @@ module top(
 	wire [7:0] hdmi_d0;
 	wire [7:0] hdmi_d1;
 	wire [7:0] hdmi_d2;
+	wire sync_valid, hsync, vsync;
+
+	reg [3:0] pll_delay = 0;
 
 	hdmi_raw hdmi(
 		// physical inputs
 		.clk_p(gpio_37),
-		.d0_p(gpio_43),
-		.d1_p(gpio_42),
+		.d0_p(gpio_42),
+		.d1_p(gpio_43),
 		.d2_p(gpio_26),
+
+		// tuning for bit clock
+		.pll_delay(pll_delay),
 
 		// outputs
 		.clk(hdmi_clk),
@@ -189,27 +203,35 @@ module top(
 		.locked(hdmi_locked),
 		.d0(hdmi_d0),
 		.d1(hdmi_d1),
-		.d2(hdmi_d2)
+		.d2(hdmi_d2),
+		.sync_valid(sync_valid),
+		.hsync(hsync),
+		.vsync(vsync)
 	);
 
-	reg [23:0] hdmi_counter;
-	reg [4:0] hdmi_clk_counter;
-	assign led_r = hdmi_counter[23];
+	reg [24:0] hdmi_counter;
+	reg [24:0] hdmi_clk_counter;
+	assign led_r = !hdmi_clk_counter[24];
 
-	assign gpio_28 = hdmi_clk_counter[4];
-	assign gpio_2 = hdmi_counter[4];
+	assign gpio_28 = hsync;
+	reg gpio_2;
 
 	always @(posedge hdmi_clk)
+	begin
 		if (hdmi_locked)
 			hdmi_clk_counter <= hdmi_clk_counter + 1;
+		else
+			gpio_2 <= 0;
+
+		pll_delay <= hdmi_clk_counter[24:21];
+		gpio_2 <= sync_valid;
+	end
 
 	always @(posedge hdmi_bit_clk)
 	begin
 		if (hdmi_locked)
-		begin
 			hdmi_counter <= hdmi_counter + 1;
-		end
-		//led_r <= hdmi_counter[22];
-//		led_r <= hdmi_d0[7] | hdmi_d1[7] | hdmi_d2[7];
+		else
+			hdmi_counter <= 0;
 	end
 endmodule
