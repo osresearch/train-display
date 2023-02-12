@@ -24,13 +24,16 @@ SB_PLL40_CORE #(
 		.DIVQ(3'b010),		// DIVQ =  2
 		.FILTER_RANGE(3'b010),	// FILTER_RANGE = 2
 		//.DELAY_ADJUSTMENT_MODE_FEEDBACK("DYNAMIC")
+		//.DELAY_ADJUSTMENT_MODE_FEEDBACK("FIXED"),
+		//.FDA_RELATIVE(15) // 3 sometimes works?
 	) uut (
 		.LOCK(locked),
 		.RESETB(1'b1),
 		.BYPASS(1'b0),
 		.REFERENCECLK(clock_in),
 		.PLLOUTGLOBAL(clock_out),
-		.DYNAMICDELAY({4'b0000, delay})
+		//.DYNAMICDELAY({4'b0000, delay})
+		//.DYNAMICDELAY({delay, 4'b0000})
 		);
 
 endmodule
