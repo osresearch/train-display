@@ -3,6 +3,18 @@
  * Only Channel 0 (Blue) has the synchronization bits and the
  * TERC4 data during the data island period.
  */
+/*
+ 5.4.2 control period coding:
+the three TMDS channels are encoded as follows:
+D0 = hsync, D1 = vsync
+case (D1, D0):
+ 0, 0: q_out[9:0] = 0b1101010100;
+ 0, 1: q_out[9:0] = 0b0010101011;
+ 1, 0: q_out[9:0] = 0b0101010100;
+ 1, 1: q_out[9:0] = 0b1010101011;
+endcase; 
+*/
+
 module tmds_decode(
 	input clk,
 	input [9:0] in,
@@ -14,10 +26,10 @@ module tmds_decode(
 	output [3:0] ctrl  // audio header?
 );
 	// the sync control bits are encoded with four specific patterns
-	parameter CTRL_00 = 10'b1101010100;
-	parameter CTRL_01 = 10'b0010101011;
-	parameter CTRL_10 = 10'b0101010100;
-	parameter CTRL_11 = 10'b1010101011;
+	parameter CTRL_00 = 10'b1101010100; // 354
+	parameter CTRL_01 = 10'b0010101011; // 0AB
+	parameter CTRL_10 = 10'b0101010100; // 154
+	parameter CTRL_11 = 10'b1010101011; // 2AB
 
 	// the control channel data
 	parameter TERC4_0 = 10'b1010011100;
@@ -39,12 +51,13 @@ module tmds_decode(
 
 	// first two of the 10 bits encodes the how the other bits
 	// are encoded (either inverted and either xor or xnor)
+	// see page 83 of HDMI 1.3 spec
 	wire invert = in[9];
 	wire use_xor = in[8];
 
 	wire [7:0] in_bits = invert ? ~in[7:0] : in;
-	wire [7:0] in_xor = { in_bits[7:1] ^ in_bits[6:0], in_bits[0] };
-	wire [7:0] in_xnor = { in_bits[7:1] ~^ in_bits[6:0], in_bits[0] };
+	wire [7:0] in_xor = { in_bits[6:0] ^ in_bits[7:1], in_bits[0] };
+	wire [7:0] in_xnor = { ~(in_bits[6:0] ^ in_bits[7:1]), in_bits[0] };
 
 	reg data_valid;
 	reg sync_valid;
@@ -61,6 +74,7 @@ module tmds_decode(
 
 		data <= use_xor ? in_xor : in_xnor;
 
+/*
 		case(in)
 		CTRL_00: { sync_valid, sync } = { 1'b1, 2'b00 };
 		CTRL_01: { sync_valid, sync } = { 1'b1, 2'b01 };
@@ -87,5 +101,11 @@ module tmds_decode(
 		default:
 			data_valid <= 1;
 		endcase
+*/
+		if (in == CTRL_00) { sync_valid, sync } = { 1'b1, 2'b00 }; else
+		if (in == CTRL_01) { sync_valid, sync } = { 1'b1, 2'b01 }; else
+		if (in == CTRL_10) { sync_valid, sync } = { 1'b1, 2'b10 }; else
+		if (in == CTRL_11) { sync_valid, sync } = { 1'b1, 2'b11 }; else
+		data_valid <= 1;
 	end
 endmodule
