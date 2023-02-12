@@ -78,7 +78,7 @@ endmodule
 module tmds_sync_recognizer(
 	input bit_clk,
 	input [9:0] in,
-	output pixel_clk,
+	output pixel_strobe,
 	output valid
 );
 	//parameter CTRL_00 = 10'b1101010100; // 354
@@ -86,27 +86,38 @@ module tmds_sync_recognizer(
 	//parameter CTRL_10 = 10'b0101010100; // 154
 	parameter CTRL_11 = 10'b1010101011; // 2AB
 
-	reg [9:0] counter = 0;
-	wire pixel_clk = valid && counter[9];
+	//reg [9:0] counter = 0;
+	//wire pixel_clk = counter[9];
+	reg [3:0] counter = 0;
+	reg pixel_strobe;
 	reg valid = 0;
 
 	always @(posedge bit_clk)
 	begin
-		counter <= { counter[8:0], counter[9] };
+		// one time step before the final one so that in contains the word
+		// in the same cycle that pixel_strobe is high
+		pixel_strobe <= counter == 4'h09;
 
-		if (in == CTRL_11) // most transitions to sync on
+		// if pixel_strobe is high this cycle, then the next bit is the
+		// zeroth of the next word
+		if (pixel_strobe)
+			counter <= 0;
+		else
+			counter <= counter + 1;
+
+		// this control word has the most transitions to sync on
+		if (in == CTRL_11)
 		begin
-			if (counter[9])
+			if (pixel_strobe)
 			begin
-				// we are in sync, the pixel clk also went high
+				// we are in sync! wonderful.
 				valid <= 1;
 			end else begin
-				// we are not in sync
+				// we are not in sync, reset the clk
 				valid <= 0;
+				//counter <= 0;
+				//pixel_strobe <= 0;
 			end
-
-			// either case, reset the clk
-			counter <= 10'b00000000001;
 		end
 	end
 endmodule
@@ -130,11 +141,12 @@ module hdmi_raw(
 	output bit_clk
 );
 	wire clk; // 25 MHz decoded from TDMS input
-	wire bit_clk; // 125 MHz PLL'ed from TMDS clock
-	wire pixel_clk, pixel_valid; // when new pixels are detected by the synchronizer
+	wire bit_clk; // 250 MHz PLL'ed from TMDS clock (or 125 MHz if DDR)
+	wire pixel_strobe, pixel_valid; // when new pixels are detected by the synchronizer
 	wire hdmi_locked;
 	assign locked = hdmi_locked;
-	assign valid = hdmi_locked && pixel_valid;
+	//assign valid = hdmi_locked && pixel_valid;
+	reg valid;
 
 	SB_GB_IO #(
 		.PIN_TYPE(6'b000000),
@@ -179,13 +191,14 @@ module hdmi_raw(
 	tmds_sync_recognizer d0_sync_recognizer(
 		.bit_clk(bit_clk),
 		.in(d0_data),
-		.pixel_clk(pixel_clk),
+		.pixel_strobe(pixel_strobe),
 		.valid(pixel_valid)
 	);
 
 	// if we have TMDS clock lock and pixel clock lock,
-	// start capturing pixel data in the pixel_clk domain
-	// and transfering it to the clk domain
+	// start capturing pixel data in the bit_clk domain
+	// when the pixel_strobe signal strobes
+	// and transfering it to the clk domain using a flag
 	reg pixel_flag = 0, last_pixel_flag;
 	reg [9:0] d0_latched = 0;
 	reg [9:0] d1_latched = 0;
@@ -200,20 +213,22 @@ module hdmi_raw(
 	begin
 		// if we have good timing and the pixel clock is valid
 		// latched the data and flag it for the clk domain
-		if (hdmi_locked && pixel_clk)
+		if (pixel_strobe)
 		begin
 			pixel_flag <= ~pixel_flag;
 			d0_latched <= d0_data;
-			//d1_latched <= d1_data;
-			//d2_latched <= d2_data;
+			d1_latched <= d1_data;
+			d2_latched <= d2_data;
 		end
 	end
 
 	always @(posedge clk)
 	begin
 		last_pixel_flag <= pixel_flag;
+		valid <= hdmi_locked && pixel_valid;
 
 		// new pixel data! copy it from the latched data into clk domain
+		// it may not be valid, but that's not our problem
 		if (last_pixel_flag != pixel_flag)
 		begin
 			d0 <= d0_latched;
@@ -275,6 +290,13 @@ module top(
 		.d0(hdmi_d0),
 		.d1(hdmi_d1),
 		.d2(hdmi_d2),
+	);
+
+	wire hsync, vsync;
+	tmds_decode d0_decoder(
+		.clk(hdmi_clk),
+		.in(hdmi_d0),
+		.sync({vsync,hsync})
 	);
 
 	// store the d0 raw data into a buffer packed with the current delay setting
@@ -360,8 +382,8 @@ module top(
 	assign led_g = !(pulse &&  hdmi_valid); // green means good pixel data
 
 	//assign gpio_28 = hdmi_clk;
-	assign gpio_2 = hdmi_valid;
-	assign gpio_28 = hdmi_clk;
+	assign gpio_2 = hsync; // hdmi_valid;
+	assign gpio_28 = vsync;
 
 	always @(posedge hdmi_clk)
 	begin
