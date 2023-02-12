@@ -12,9 +12,9 @@ module ram(
 );
 	parameter ADDR_WIDTH=8;
 	parameter DATA_WIDTH=8;
-	parameter NUM_BYTES= 1 << ADDR_WIDTH;
+	parameter NUM_WORDS = 1 << ADDR_WIDTH;
 
-	reg [DATA_WIDTH-1:0] mem[0:NUM_BYTES-1];
+	reg [DATA_WIDTH-1:0] mem[0:NUM_WORDS-1];
 	reg [DATA_WIDTH-1:0] rd_data;
 
         //initial $readmemh("packed0.hex", mem);

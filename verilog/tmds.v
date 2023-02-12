@@ -57,7 +57,7 @@ module tmds_decode(
 
 	wire [7:0] in_bits = invert ? ~in[7:0] : in;
 	wire [7:0] in_xor = { in_bits[6:0] ^ in_bits[7:1], in_bits[0] };
-	wire [7:0] in_xnor = { ~(in_bits[6:0] ^ in_bits[7:1]), in_bits[0] };
+	wire [7:0] in_xnor = { in_bits[6:0] ^~ in_bits[7:1], in_bits[0] };
 
 	reg data_valid;
 	reg sync_valid;
@@ -74,7 +74,6 @@ module tmds_decode(
 
 		data <= use_xor ? in_xor : in_xnor;
 
-/*
 		case(in)
 		CTRL_00: { sync_valid, sync } = { 1'b1, 2'b00 };
 		CTRL_01: { sync_valid, sync } = { 1'b1, 2'b01 };
@@ -101,11 +100,12 @@ module tmds_decode(
 		default:
 			data_valid <= 1;
 		endcase
-*/
+/*
 		if (in == CTRL_00) { sync_valid, sync } = { 1'b1, 2'b00 }; else
 		if (in == CTRL_01) { sync_valid, sync } = { 1'b1, 2'b01 }; else
 		if (in == CTRL_10) { sync_valid, sync } = { 1'b1, 2'b10 }; else
 		if (in == CTRL_11) { sync_valid, sync } = { 1'b1, 2'b11 }; else
 		data_valid <= 1;
+*/
 	end
 endmodule
