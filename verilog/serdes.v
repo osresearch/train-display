@@ -304,23 +304,30 @@ module hdmi_framebuffer(
 
 	output [ADDR_WIDTH-1:0] waddr,
 	output [7:0] wdata,
-	output wen
+	output wen,
+	output in_window
 );
 	parameter ADDR_WIDTH = 13;
-	parameter [11:0] MIN_X = 200;
-	parameter [11:0] MIN_Y = 150;
+	parameter [11:0] MIN_X = 50;
+	parameter [11:0] MIN_Y = 50;
 	parameter [11:0] WIDTH = 128;
 	parameter [11:0] HEIGHT = 100;
 
 	reg [11:0] xaddr;
 	reg [11:0] yaddr;
+	wire [11:0] xoffset = xaddr - MIN_X;
+	wire [11:0] yoffset = yaddr - MIN_Y;
+	wire in_window = (xoffset < WIDTH) && (yoffset < HEIGHT);
+
 	reg [ADDR_WIDTH-1:0] waddr;
 	reg [7:0] wdata;
 	reg wen;
+	reg last_hsync;
 
 	always @(posedge clk)
 	begin
 		wen <= 0;
+		last_hsync <= hsync;
 
 		if (!valid)
 		begin
@@ -328,23 +335,25 @@ module hdmi_framebuffer(
 		end else
 		if (!vsync)
 		begin
-			xaddr <= 0;
+			// edge triggered, but we can hold this as long as we need to
 			yaddr <= 0;
+			xaddr <= 0;
 		end else
 		if (!hsync) begin
+			// only advance the y on the falling edge of hsync
+			if (last_hsync)
+				yaddr <= yaddr + 1;
 			xaddr <= 0;
-			yaddr <= yaddr + 1;
 		end else
 		if (data_valid) begin
 			xaddr <= xaddr + 1;
 
-			if (MIN_X <= xaddr && xaddr < MIN_X+WIDTH
-			&&  MIN_Y <= yaddr && yaddr < MIN_Y+HEIGHT)
+			if (in_window)
 				wen <= 1;
 
 			// we only have one channel right now
 			// width should be a power of two
-			waddr <= (xaddr - MIN_X) + ((yaddr - MIN_Y) * WIDTH);
+			waddr <= xoffset + (yoffset * WIDTH);
 			wdata <= d0;
 		end
 	end
@@ -427,9 +436,15 @@ module top(
 		.data_valid(data_valid)
 	);
 
+	reg guard_band;
+	always @(posedge hdmi_clk)
+		guard_band <= hdmi_d0 == 10'h2CC;
+
 	parameter ADDR_WIDTH = 14;
 	parameter WIDTH = 128;
-	parameter HEIGHT = 100;
+	parameter HEIGHT = 120;
+	parameter MIN_X = 0;
+	parameter MIN_Y = 0;
 
 	wire [ADDR_WIDTH-1:0] waddr;
 	wire [7:0] wdata;
@@ -450,16 +465,20 @@ module top(
 		.wr_data(wdata)
 	);
 
+	wire in_window;
+
 	hdmi_framebuffer #(
 		.ADDR_WIDTH(ADDR_WIDTH),
 		.WIDTH(WIDTH),
-		.HEIGHT(HEIGHT)
+		.HEIGHT(HEIGHT),
+		.MIN_X(MIN_X),
+		.MIN_Y(MIN_Y)
 	) hdmi_fb(
 		.clk(hdmi_clk),
 		.valid(hdmi_valid),
 		.hsync(hsync),
 		.vsync(vsync),
-		.data_valid(data_valid),
+		.data_valid(1), //data_valid),
 		.d0(d0),
 		.d1(d1),
 		.d2(d2),
@@ -468,6 +487,7 @@ module top(
 		.waddr(waddr),
 		.wdata(wdata),
 		.wen(wen),
+		.in_window(in_window)
 	);
 
 
@@ -568,8 +588,8 @@ module top(
 	assign led_g = !(pulse &&  hdmi_valid); // green means good pixel data
 
 	//assign gpio_28 = hdmi_clk;
-	assign gpio_2 = wen; //hsync; // hdmi_valid;
-	assign gpio_28 = hsync;
+	assign gpio_2 = in_window; // hsync; // hdmi_valid;
+	assign gpio_28 = vsync;
 
 	always @(posedge hdmi_clk)
 	begin
