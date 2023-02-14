@@ -96,13 +96,32 @@ time scans of each row.
 
 ![HDMI Interface](images/hdmi.jpg)
 
-A prototype using the [IT6604E](datasheets/it6604e.pdf) HDMI
-deserializer in an old USB HDMI capture device.  It works with
-as a low resolution display, although that part is EOL'ed.
-Eventually a board with a [TI TFP401](https://cdn-shop.adafruit.com/datasheets/tfp401.pdf)
-based on [Adafruit design](https://www.adafruit.com/product/2218)
-would be a better choice.  This would eliminate the need to do
-the special Pi setup and also enable OpenGL support.
+The ice40up5k is just barely fast enough to process the baseline 640x480@60 video
+that HDMI requires devices to support.  This eliminates the need to do
+the special Pi setup and also enables OpenGL support or the user of any other
+device with HDMI output as a video source.
+
+The signalling requires 8 pins for the four differential pairs (Clock, Blue, Red, Green)
+and two pins for the i2c, leaving plenty of pins for outputs to drive the LED matrices.
+
+HDMI uses CML differential pairs, so they require 50 Ohm pullup resistors and
+a 100 Ohm across the input pins.  TODO: should they be AC coupled via 10nF caps?
+
+The HDMI pixel clock is 1/10th of the bit rate and at an unknown phase
+relative to the bits.  This requires a PLL on the clock and then also
+necessitates a clock-crossing technique for moving the raw 8b10b encoded
+data to pixel clock.  At 640x480@60, the pixel clock is 25 MHz, which is
+no problem, and the bit clock is 250 MHz, which is at the upper limit of
+the ice40up5k.  TODO: can this use DDR at 5x to reduce the speed required?
+
+The HDMI clock pin *must* connect to the global buffer input, GPIO 37 and its pair.
+This allows it to feed into the global fanout clock, and also feed into the PLL.
+
+The HDMI data pins can use any of the differential pairs, ideally next to the clock inputs
+and with matched lengths.
+
+TODO: implement EDID interface so that the Pi doesn't need to be hacked to force 640x480.
+
 
 ## Pi setup
 ![xterm prompt on the panel](images/pi-display.jpg)
