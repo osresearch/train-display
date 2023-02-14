@@ -457,11 +457,11 @@ module top(
 	always @(posedge hdmi_clk)
 		guard_band <= hdmi_d0 == 10'h2CC;
 
-	parameter ADDR_WIDTH = 14;
-	parameter WIDTH = 128;
-	parameter HEIGHT = 100;
-	parameter MIN_X = 300;
-	parameter MIN_Y = 280;
+	parameter ADDR_WIDTH = 16;
+	parameter WIDTH = 256;
+	parameter HEIGHT = 200;
+	parameter MIN_X = 40;
+	parameter MIN_Y = 40;
 
 	wire [ADDR_WIDTH-1:0] waddr;
 	wire [7:0] wdata;
@@ -471,16 +471,16 @@ module top(
 	wire [7:0] rdata;
 	ram #(
 		.ADDR_WIDTH(ADDR_WIDTH),
-		.DATA_WIDTH(8),
+		.DATA_WIDTH(1),
 		.NUM_WORDS(WIDTH*HEIGHT)
 	) fb_ram(
 		.rd_clk(clk),
 		.rd_addr(raddr),
-		.rd_data(rdata),
+		.rd_data(rdata[0]),
 		.wr_clk(hdmi_clk),
 		.wr_addr(waddr),
 		.wr_enable(wen),
-		.wr_data(wdata)
+		.wr_data(wdata != 0)
 	);
 
 	wire in_window;
@@ -542,39 +542,27 @@ module top(
 	);
 
 	reg [7:0] extra_data;
-	reg wdata_more = 0;
+	reg [4:0] bit_count = 0;
 	always @(posedge clk)
 	begin
 		uart_txd_strobe <= 0;
 
-/*
-		if (uart_txd_ready && hdmi_valid && !uart_txd_strobe)
+		if (bit_count != 8)
 		begin
-			if (wdata_more) begin
-				uart_txd <= extra_data;
-				wdata_more <= 0;
-				uart_txd_strobe <= 1;
-
-				if (raddr == WIDTH*HEIGHT - 1)
-					raddr <= 0;
-				else
-					raddr <= raddr + 1;
-			end else begin
-				{ uart_txd, extra_data } <= rdata;
-				wdata_more <= 1;
-				uart_txd_strobe <= 1;
-			end
-		end
-*/
-		if (uart_txd_ready && hdmi_valid && !uart_txd_strobe)
-		begin
-			uart_txd <= rdata;
-			uart_txd_strobe <= 1;
+			// read up to eight bits from the fb
+			extra_data <= { rdata[0], extra_data[7:1] };
+			bit_count <= bit_count + 1;
 
 			if (raddr == WIDTH*HEIGHT - 1)
 				raddr <= 0;
 			else
 				raddr <= raddr + 1;
+		end else
+		if (uart_txd_ready && hdmi_valid && !uart_txd_strobe)
+		begin
+			uart_txd <= extra_data;
+			uart_txd_strobe <= 1;
+			bit_count <= 0;
 		end
 	end
 
